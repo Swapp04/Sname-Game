@@ -3,6 +3,8 @@ import random
 import sys
 import time
 import math
+import json
+import os
 
 # Initialize pygame
 pygame.init()
@@ -25,6 +27,7 @@ BLUE = (0, 0, 255)
 GRAY = (100, 100, 100)
 GOLD = (255, 215, 0)
 PURPLE = (128, 0, 128)
+YELLOW = (255, 255, 0)
 
 # Background and textures
 BG_COLOR = (10, 20, 30)  # Darker blue-black
@@ -47,6 +50,33 @@ small_font = pygame.font.SysFont('Arial', 16)
 
 # Clock for controlling the frame rate
 clock = pygame.time.Clock()
+
+# Game states
+MENU = "menu"
+PLAYING = "playing"
+PAUSED = "paused"
+GAME_OVER = "game_over"
+TUTORIAL = "tutorial"
+
+# Difficulty settings
+DIFFICULTIES = {
+    "Easy": {"speed": 8, "power_up_chance": 0.015, "score_multiplier": 1.0},
+    "Normal": {"speed": 10, "power_up_chance": 0.01, "score_multiplier": 1.5},
+    "Hard": {"speed": 12, "power_up_chance": 0.008, "score_multiplier": 2.0}
+}
+
+# High score file
+HIGH_SCORE_FILE = "high_scores.json"
+
+def load_high_scores():
+    if os.path.exists(HIGH_SCORE_FILE):
+        with open(HIGH_SCORE_FILE, 'r') as f:
+            return json.load(f)
+    return {"Easy": 0, "Normal": 0, "Hard": 0}
+
+def save_high_scores(scores):
+    with open(HIGH_SCORE_FILE, 'w') as f:
+        json.dump(scores, f)
 
 # Sound functionality has been completely removed
 
@@ -155,9 +185,10 @@ class Snake:
             'invincible': {'active': False, 'end_time': 0},
             'double_points': {'active': False, 'end_time': 0}
         }
-        # New property for snake trail effect
         self.trail = []
-        self.trail_length = 5  # How many trail particles to keep
+        self.trail_length = 5
+        self.movement_effect = 0  # For smooth movement animation
+        self.movement_speed = 0.2  # Speed of movement animation
     
     def get_head_position(self):
         return self.positions[0]
@@ -197,7 +228,7 @@ class Snake:
         new_y = (head[1] + self.direction[1]) % GRID_HEIGHT
         new_head = (new_x, new_y)
         
-                        # Check if the snake hit itself (unless invincible)
+        # Check if the snake hit itself (unless invincible)
         if new_head in self.positions[1:] and not self.power_ups['invincible']['active']:
             self.is_alive = False
             return
@@ -207,10 +238,12 @@ class Snake:
         # Add trail particle at the tail position
         if len(self.positions) > self.length:
             tail = self.positions.pop()
-            # Add the tail position to the trail
             self.trail.append((tail[0] * GRID_SIZE + GRID_SIZE//2, tail[1] * GRID_SIZE + GRID_SIZE//2))
             if len(self.trail) > self.trail_length:
                 self.trail.pop(0)
+        
+        # Update movement effect
+        self.movement_effect = (self.movement_effect + self.movement_speed) % 1
     
     def grow(self, points=10):
         self.length += 1
@@ -433,24 +466,83 @@ def game_over_screen(surface, snake):
     restart_text = font.render('Press R to restart or Q to quit', True, WHITE)
     surface.blit(restart_text, (SCREEN_WIDTH // 2 - restart_text.get_width() // 2, SCREEN_HEIGHT // 2 + 80))
 
+def draw_menu(surface, high_scores):
+    # Create a semi-transparent overlay
+    overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))
+    surface.blit(overlay, (0, 0))
+    
+    # Title
+    title = large_font.render('SNAKE GAME', True, GREEN)
+    surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, SCREEN_HEIGHT // 4))
+    
+    # Menu options
+    options = ['Play', 'Tutorial', 'High Scores', 'Quit']
+    for i, option in enumerate(options):
+        text = font.render(option, True, WHITE)
+        surface.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, SCREEN_HEIGHT // 2 + i * 50))
+    
+    # Show high scores
+    scores_text = font.render('High Scores:', True, GOLD)
+    surface.blit(scores_text, (SCREEN_WIDTH // 2 - scores_text.get_width() // 2, SCREEN_HEIGHT * 3 // 4))
+    
+    for i, (difficulty, score) in enumerate(high_scores.items()):
+        score_text = small_font.render(f'{difficulty}: {score}', True, WHITE)
+        surface.blit(score_text, (SCREEN_WIDTH // 2 - score_text.get_width() // 2, SCREEN_HEIGHT * 3 // 4 + 30 + i * 25))
+
+def draw_tutorial(surface):
+    overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))
+    surface.blit(overlay, (0, 0))
+    
+    title = large_font.render('How to Play', True, GREEN)
+    surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 50))
+    
+    instructions = [
+        "Use arrow keys or WASD to move the snake",
+        "Collect red food to grow and increase your score",
+        "Watch out for power-ups:",
+        "  - Blue: Speed boost",
+        "  - Purple: Slow down",
+        "  - Gold: Invincibility",
+        "  - Pink: Double points",
+        "Press SPACE to pause",
+        "Press ESC to return to menu",
+        "",
+        "Press any key to continue"
+    ]
+    
+    for i, text in enumerate(instructions):
+        color = WHITE if i < 2 else GOLD if i == 2 else YELLOW if 3 <= i <= 6 else WHITE
+        instruction = small_font.render(text, True, color)
+        surface.blit(instruction, (SCREEN_WIDTH // 2 - instruction.get_width() // 2, 150 + i * 25))
+
+def draw_pause_menu(surface):
+    overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))
+    surface.blit(overlay, (0, 0))
+    
+    title = large_font.render('PAUSED', True, WHITE)
+    surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, SCREEN_HEIGHT // 3))
+    
+    options = ['Resume', 'Restart', 'Main Menu']
+    for i, option in enumerate(options):
+        text = font.render(option, True, WHITE)
+        surface.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, SCREEN_HEIGHT // 2 + i * 50))
+
 def main():
-    snake = Snake()
-    food = Food()
-    power_up = PowerUp()
-    particle_system = ParticleSystem()
+    # Load high scores
+    high_scores = load_high_scores()
     
-    # Game variables
-    base_game_speed = GAME_SPEED
-    game_speed = base_game_speed
-    game_over = False
-    last_move_time = 0
-    power_up_chance = 0.01  # 1% chance per frame to spawn a power-up
+    # Game state variables
+    game_state = MENU
+    difficulty = "Normal"
+    selected_option = 0
     
-    # Background elements
+    # Initialize background stars
     stars = [(random.randint(0, SCREEN_WIDTH), random.randint(0, SCREEN_HEIGHT), random.random() * 1.5 + 0.5) 
              for _ in range(100)]
     
-    # Game loop
     while True:
         current_time = pygame.time.get_ticks()
         
@@ -459,16 +551,40 @@ def main():
                 pygame.quit()
                 sys.exit()
             
-            # Handle key presses
             if event.type == pygame.KEYDOWN:
-                if game_over:
-                    if event.key == pygame.K_r:
-                        return main()  # Restart the game
-                    elif event.key == pygame.K_q:
-                        pygame.quit()
-                        sys.exit()
-                else:
-                    if event.key == pygame.K_UP or event.key == pygame.K_w:
+                if game_state == MENU:
+                    if event.key == pygame.K_UP:
+                        selected_option = (selected_option - 1) % 4
+                    elif event.key == pygame.K_DOWN:
+                        selected_option = (selected_option + 1) % 4
+                    elif event.key == pygame.K_RETURN:
+                        if selected_option == 0:
+                            game_state = PLAYING
+                            snake = Snake()
+                            food = Food()
+                            power_up = PowerUp()
+                            particle_system = ParticleSystem()
+                            base_game_speed = DIFFICULTIES[difficulty]["speed"]
+                            game_speed = base_game_speed
+                            last_move_time = 0
+                            power_up_chance = DIFFICULTIES[difficulty]["power_up_chance"]
+                        elif selected_option == 1:
+                            game_state = TUTORIAL
+                        elif selected_option == 2:
+                            # Show high scores screen
+                            pass
+                        elif selected_option == 3:
+                            pygame.quit()
+                            sys.exit()
+                
+                elif game_state == TUTORIAL:
+                    game_state = MENU
+                
+                elif game_state == PLAYING:
+                    if event.key == pygame.K_ESCAPE:
+                        game_state = PAUSED
+                        selected_option = 0
+                    elif event.key == pygame.K_UP or event.key == pygame.K_w:
                         snake.change_direction(UP)
                     elif event.key == pygame.K_DOWN or event.key == pygame.K_s:
                         snake.change_direction(DOWN)
@@ -476,19 +592,45 @@ def main():
                         snake.change_direction(LEFT)
                     elif event.key == pygame.K_RIGHT or event.key == pygame.K_d:
                         snake.change_direction(RIGHT)
-                    elif event.key == pygame.K_SPACE:
-                        # Pause functionality (toggle game speed)
-                        if game_speed > 0:
-                            game_speed = 0  # Pause
-                        else:
-                            game_speed = adjust_speed(base_game_speed, snake)  # Resume
+                
+                elif game_state == PAUSED:
+                    if event.key == pygame.K_UP:
+                        selected_option = (selected_option - 1) % 3
+                    elif event.key == pygame.K_DOWN:
+                        selected_option = (selected_option + 1) % 3
+                    elif event.key == pygame.K_RETURN:
+                        if selected_option == 0:
+                            game_state = PLAYING
+                        elif selected_option == 1:
+                            game_state = PLAYING
+                            snake = Snake()
+                            food = Food()
+                            power_up = PowerUp()
+                            base_game_speed = DIFFICULTIES[difficulty]["speed"]
+                            game_speed = base_game_speed
+                            last_move_time = 0
+                            power_up_chance = DIFFICULTIES[difficulty]["power_up_chance"]
+                        elif selected_option == 2:
+                            game_state = MENU
+                
+                elif game_state == GAME_OVER:
+                    if event.key == pygame.K_r:
+                        game_state = PLAYING
+                        snake = Snake()
+                        food = Food()
+                        power_up = PowerUp()
+                        base_game_speed = DIFFICULTIES[difficulty]["speed"]
+                        game_speed = base_game_speed
+                        last_move_time = 0
+                        power_up_chance = DIFFICULTIES[difficulty]["power_up_chance"]
+                    elif event.key == pygame.K_q:
+                        game_state = MENU
         
-        # Clear screen with a nicer background
+        # Clear screen
         screen.fill(BG_COLOR)
         
-        # Draw stars in the background
+        # Draw background stars
         for i, (x, y, size) in enumerate(stars):
-            # Make stars twinkle
             brightness = 128 + int(127 * math.sin(current_time / 1000 + i))
             color = (brightness, brightness, brightness)
             pygame.draw.circle(screen, color, (int(x), int(y)), int(size))
@@ -496,54 +638,53 @@ def main():
         # Draw grid
         draw_grid(screen)
         
-        if not game_over:
-            # Update snake power-ups
+        if game_state == MENU:
+            draw_menu(screen, high_scores)
+            # Highlight selected option
+            options = ['Play', 'Tutorial', 'High Scores', 'Quit']
+            text = font.render(options[selected_option], True, GREEN)
+            screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, SCREEN_HEIGHT // 2 + selected_option * 50))
+        
+        elif game_state == TUTORIAL:
+            draw_tutorial(screen)
+        
+        elif game_state == PLAYING:
+            # Update game logic
             snake.update_power_ups()
-            
-            # Adjust game speed based on power-ups
             game_speed = adjust_speed(base_game_speed, snake)
             
-            # Move the snake on a timer for smoother movement
             if current_time - last_move_time > 1000 / game_speed:
                 snake.move()
                 last_move_time = current_time
                 
-                # Check if snake is dead
                 if not snake.is_alive:
-                    game_over = True
-                    # Create explosion particles at snake head
-                    head_pos = snake.get_head_position()
-                    head_x = head_pos[0] * GRID_SIZE + GRID_SIZE // 2
-                    head_y = head_pos[1] * GRID_SIZE + GRID_SIZE // 2
-                    particle_system.add_particles(head_x, head_y, RED, 30)
+                    game_state = GAME_OVER
+                    # Update high score if applicable
+                    if snake.score > high_scores[difficulty]:
+                        high_scores[difficulty] = snake.score
+                        save_high_scores(high_scores)
             
-            # Update food animation
+            # Update food and power-ups
             food.update()
             
-            # Check if snake ate the food
             if snake.get_head_position() == food.position:
-                snake.grow()
+                snake.grow(points=10 * DIFFICULTIES[difficulty]["score_multiplier"])
                 food.randomize_position()
                 
-                # Create particles at food position
                 food_x = food.position[0] * GRID_SIZE + GRID_SIZE // 2
                 food_y = food.position[1] * GRID_SIZE + GRID_SIZE // 2
                 particle_system.add_particles(food_x, food_y, GREEN, 15)
                 
-                # Make sure food doesn't spawn on the snake or power-up
                 while food.position in snake.positions or (power_up.active and food.position == power_up.position):
                     food.randomize_position()
                 
-                # Increase game speed slightly every time snake eats
-                if base_game_speed < 20:  # Cap the maximum speed
+                if base_game_speed < 20:
                     base_game_speed += 0.2
             
-            # Check if snake got a power-up
             if power_up.active and snake.get_head_position() == power_up.position:
                 snake.apply_power_up(power_up.type)
                 power_up.active = False
                 
-                # Create special particles at power-up position
                 power_up_x = power_up.position[0] * GRID_SIZE + GRID_SIZE // 2
                 power_up_y = power_up.position[1] * GRID_SIZE + GRID_SIZE // 2
                 if power_up.type == 'speed':
@@ -555,46 +696,47 @@ def main():
                 elif power_up.type == 'double_points':
                     particle_system.add_particles(power_up_x, power_up_y, (255, 105, 180), 20)
             
-            # Check if power-up has expired
             if power_up.active and power_up.is_expired():
                 power_up.active = False
             
-            # Random chance to spawn a power-up if none is active
             if not power_up.active and random.random() < power_up_chance and snake.length > 5:
                 power_up.activate()
-                # Make sure power-up doesn't spawn on the snake or food
                 while power_up.position in snake.positions or power_up.position == food.position:
                     power_up.randomize_position()
             
-            # Update particles
             particle_system.update()
             
-            # Draw the food, power-up, snake, and particles
+            # Draw game elements
             food.draw(screen)
             if power_up.active:
                 power_up.draw(screen)
             snake.draw(screen)
             particle_system.draw(screen)
-            
-            # Show the HUD (score, length, power-ups)
             draw_hud(screen, snake, True)
-        else:
-            # Still draw snake and food in game over screen
+        
+        elif game_state == PAUSED:
+            # Draw game elements in background
+            food.draw(screen)
+            if power_up.active:
+                power_up.draw(screen)
+            snake.draw(screen)
+            particle_system.draw(screen)
+            draw_hud(screen, snake, True)
+            draw_pause_menu(screen)
+            # Highlight selected option
+            options = ['Resume', 'Restart', 'Main Menu']
+            text = font.render(options[selected_option], True, GREEN)
+            screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, SCREEN_HEIGHT // 2 + selected_option * 50))
+        
+        elif game_state == GAME_OVER:
             food.draw(screen)
             snake.draw(screen)
             particle_system.draw(screen)
-            
-            # Update and draw particles even in game over
             particle_system.update()
             particle_system.draw(screen)
-            
-            # Show game over screen
             game_over_screen(screen, snake)
         
-        # Update the display
         pygame.display.update()
-        
-        # Control the frame rate (always keep high for smooth animations)
         clock.tick(60)
 
 def adjust_speed(base_speed, snake):
